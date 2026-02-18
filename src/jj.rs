@@ -1,16 +1,14 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Commit {
     pub change_id: String,
     pub commit_id: String,
     pub description: String,
     pub author: String,
     pub empty: bool,
-    #[serde(skip)]
     pub pr_number: Option<u64>,
 }
 
@@ -52,13 +50,9 @@ impl Jj {
 
     /// Get commits from a revset expression
     pub fn get_commits_from_revset(&self, revset: &str) -> Result<Vec<Commit>> {
-        let template = r#"{
-            "change_id": change_id,
-            "commit_id": commit_id,
-            "description": description,
-            "author": author.email(),
-            "empty": empty
-        }"#;
+        // Use null bytes as field separators (safe since git commit metadata never contains \0)
+        // Record format: change_id\0commit_id\0author\0empty\0description\0\0
+        let template = r#"change_id ++ "\0" ++ commit_id ++ "\0" ++ author.email() ++ "\0" ++ if(empty, "true", "false") ++ "\0" ++ description ++ "\0\0""#;
 
         let output = self.execute(&[
             "log",
@@ -69,19 +63,25 @@ impl Jj {
             template,
         ])?;
 
-        // Parse each line as a separate JSON object
         let mut commits = Vec::new();
-        for line in output.lines() {
-            let line = line.trim();
-            if line.is_empty() {
+        for record in output.split("\0\0") {
+            if record.trim_matches('\n').is_empty() {
                 continue;
             }
-            let mut commit: Commit = serde_json::from_str(line)
-                .context("Failed to parse commit JSON")?;
-
-            // Parse PR number from commit message
+            // Split into at most 5 fields; description is last and may contain \0 (unlikely but safe)
+            let parts: Vec<&str> = record.splitn(5, '\0').collect();
+            if parts.len() < 5 {
+                continue;
+            }
+            let mut commit = Commit {
+                change_id: parts[0].to_string(),
+                commit_id: parts[1].to_string(),
+                author: parts[2].to_string(),
+                empty: parts[3] == "true",
+                description: parts[4].to_string(),
+                pr_number: None,
+            };
             commit.pr_number = crate::message::parse_pr_number(&commit.description);
-
             commits.push(commit);
         }
 

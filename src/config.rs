@@ -20,8 +20,12 @@ impl Config {
 
         // Try to load from saved config
         if let Some(saved_base) = Self::load_base_branch()? {
+            let normalized = Self::normalize_base_branch(&saved_base);
+            if normalized != saved_base {
+                Self::save_base_branch(&normalized)?;
+            }
             return Ok(Self {
-                base_branch: saved_base,
+                base_branch: normalized,
             });
         }
 
@@ -36,9 +40,18 @@ impl Config {
         })
     }
 
+    /// Convert old git-style "origin/master" to jj-style "master@origin"
+    fn normalize_base_branch(branch: &str) -> String {
+        if let Some(name) = branch.strip_prefix("origin/") {
+            format!("{}@origin", name)
+        } else {
+            branch.to_string()
+        }
+    }
+
     /// Detect the base branch by checking what exists on origin
     fn detect_base_branch(repo_path: impl AsRef<Path>) -> Result<String> {
-        let candidates = ["origin/master", "origin/main"];
+        let candidates = ["master@origin", "main@origin"];
 
         // Try to find which branch exists
         for candidate in candidates {
@@ -116,10 +129,11 @@ impl Config {
         &self.base_branch
     }
 
-    /// Get just the branch name without remote (e.g., "master" from "origin/master")
+    /// Get just the branch name without remote (e.g., "master" from "master@origin")
     pub fn base_branch_name(&self) -> &str {
         self.base_branch
-            .strip_prefix("origin/")
+            .strip_suffix("@origin")
+            .or_else(|| self.base_branch.strip_prefix("origin/"))
             .unwrap_or(&self.base_branch)
     }
 }

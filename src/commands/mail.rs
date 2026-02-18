@@ -67,7 +67,10 @@ pub async fn mail(
         git.push_branch(&branch_name, "origin")
             .context("Failed to push branch")?;
 
-        let base_branch = previous_branch.trim_start_matches("origin/");
+        let base_branch = previous_branch
+            .strip_suffix("@origin")
+            .or_else(|| previous_branch.strip_prefix("origin/"))
+            .unwrap_or(&previous_branch);
 
         // Check if commit already has a PR number in its message
         if let Some(pr_num) = commit.pr_number {
