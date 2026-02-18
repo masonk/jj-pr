@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        ".env": "shell",
+        ".envrc": "shell"
+    }
+}

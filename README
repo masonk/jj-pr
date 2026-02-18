@@ -1,0 +1,30 @@
+# jj-stack: A utility that facilitates stacked PRs
+
+GitHub has a branch-centric workflow for pull requests. Specifically, in GitHub, every pull request must be its own named branch.
+
+There's a well-posed argument against branch-based workflows in [SpaceDentist's SPR repo](https://github.com/spacedentist/spr/blob/master/docs/README.md)
+
+Branch-based code review is a poor model. There are two reasons for this:
+
+- Atomicity
+
+Every individual commit that merges to master needs to atomically bring master from one good to state to another. Or, as SpaceDentist put it, "each commit...should have a coherent thesis and be a complete change in itself".
+
+Just pause and consider this definition of a commit: A self-contained change has a coherent thesis and is not divisible into smaller commits.
+
+It simply follows from this defintion that a commit *is the logical unit of code review*, since code reviews (1) must be done in relationship to a coherent thesis and (2) scale superlinearly in difficulty with the size of the changes. So a definition of a commit is the precise object that minimizes the effort of code review.
+
+## jj-stack
+
+### Automatically creating PR branches from jj commits
+`jj stack mail` creates PR branches that are 1:1 with jj commits. When one of those tracked commits changes in the local repo, jj's core functionality automatically propagates the change to dowstream commits. `jj stack sync` then ensures that all of the PR branches associates with these commits are reset to the new commit versions.
+
+### Two-way propagation
+Especially in the era of AI code review bots, it's common to first alter a PR branch *on the origin* and need those changes to come down to local.
+
+`jj stack sync` squash changes to the origin branch down onto the local commit.
+
+### Landing
+
+There is no separate `land` command in this repo. GitHub itself usually wants to control the merge-master flow; there are complicated patterns for merging approved PR branches, such as merge queues, and then there's the GUI button to do it.
+j stack doesn't need to control the merging process, it simply detects when a PR branch has merged to master and updates the local repo to account.
