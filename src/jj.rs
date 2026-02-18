@@ -47,6 +47,11 @@ impl Jj {
     /// Get commits between two revisions (e.g., "origin/master..@")
     pub fn get_commits(&self, from: &str, to: &str) -> Result<Vec<Commit>> {
         let revset = format!("{}..{}", from, to);
+        self.get_commits_from_revset(&revset)
+    }
+
+    /// Get commits from a revset expression
+    pub fn get_commits_from_revset(&self, revset: &str) -> Result<Vec<Commit>> {
         let template = r#"{
             "change_id": change_id,
             "commit_id": commit_id,
@@ -58,7 +63,7 @@ impl Jj {
         let output = self.execute(&[
             "log",
             "-r",
-            &revset,
+            revset,
             "--no-graph",
             "-T",
             template,

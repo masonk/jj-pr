@@ -23,15 +23,25 @@ enum Commands {
     Mail {
         /// Base branch to compare against (e.g., "origin/master" or "origin/main")
         /// If not specified, uses saved config or auto-detects
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "revisions")]
         base: Option<String>,
+
+        /// Revset expression to specify which commits to process (e.g., "origin/main..@")
+        /// Mutually exclusive with --base
+        #[arg(short, long)]
+        revisions: Option<String>,
     },
     /// Pull down changes from PR branches and reset them to local commits
     Sync {
         /// Base branch to compare against (e.g., "origin/master" or "origin/main")
         /// If not specified, uses saved config or auto-detects
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "revisions")]
         base: Option<String>,
+
+        /// Revset expression to specify which commits to process (e.g., "origin/main..@")
+        /// Mutually exclusive with --base
+        #[arg(short, long)]
+        revisions: Option<String>,
 
         /// Show sync status without actually syncing
         #[arg(short, long)]
@@ -52,11 +62,11 @@ async fn main() -> Result<()> {
         .expect("GITHUB_TOKEN or GH_TOKEN environment variable required");
 
     match cli.command {
-        Commands::Mail { base } => {
-            commands::mail::mail(repo_path, github_token, base).await?;
+        Commands::Mail { base, revisions } => {
+            commands::mail::mail(repo_path, github_token, base, revisions).await?;
         }
-        Commands::Sync { base, status } => {
-            commands::sync::sync(repo_path, github_token, base, status).await?;
+        Commands::Sync { base, revisions, status } => {
+            commands::sync::sync(repo_path, github_token, base, revisions, status).await?;
         }
     }
 

@@ -11,6 +11,7 @@ pub async fn sync(
     repo_path: impl AsRef<Path>,
     github_token: String,
     base_override: Option<String>,
+    revisions: Option<String>,
     status_only: bool,
 ) -> Result<()> {
     let jj = Jj::new(&repo_path)?;
@@ -28,12 +29,17 @@ pub async fn sync(
     } else {
         println!("🔄 Syncing commits...");
     }
-    println!("   Base branch: {}", config.base_ref());
 
-    // Get all commits between base branch and @
-    let commits = jj
-        .get_commits(config.base_ref(), "@")
-        .context("Failed to get commits from jj")?;
+    // Get all commits - either from revset or between base branch and @
+    let commits = if let Some(ref revset) = revisions {
+        println!("   Using revset: {}", revset);
+        jj.get_commits_from_revset(revset)
+            .context("Failed to get commits from revset")?
+    } else {
+        println!("   Base branch: {}", config.base_ref());
+        jj.get_commits(config.base_ref(), "@")
+            .context("Failed to get commits from jj")?
+    };
 
     // Filter out empty commits
     let nonempty_commits: Vec<_> = commits.into_iter().filter(|c| !c.empty).collect();
@@ -64,7 +70,7 @@ pub async fn sync(
 
         // Skip commits that haven't been mailed yet
         if commit.pr_number.is_none() {
-            println!("   ⏭️  Not mailed yet (run 'jstack mail' first)");
+            println!("   ⏭️  Not mailed yet (run 'jj-pr mail' first)");
             skipped_count += 1;
             continue;
         }
@@ -127,26 +133,26 @@ pub async fn sync(
                     local_only_commits.len()
                 );
                 if status_only {
-                    println!("      Run 'jstack sync' to merge (may require conflict resolution)");
+                    println!("      Run 'jj-pr sync' to merge (may require conflict resolution)");
                 }
             }
             (true, false) => {
                 println!("   ⬇️  Remote has {} new commit(s)", remote_only_commits.len());
                 if status_only {
-                    println!("      Run 'jstack sync' to pull changes");
+                    println!("      Run 'jj-pr sync' to pull changes");
                 }
             }
             (false, true) => {
                 println!("   ⬆️  Local has {} new commit(s)", local_only_commits.len());
                 if status_only {
-                    println!("      Run 'jstack sync' to push changes");
+                    println!("      Run 'jj-pr sync' to push changes");
                 }
             }
             (false, false) => {
                 // Trees must differ even though no commits between them
                 println!("   🔄 Out of sync (trees differ)");
                 if status_only {
-                    println!("      Run 'jstack sync' to synchronize");
+                    println!("      Run 'jj-pr sync' to synchronize");
                 }
             }
         }
@@ -173,7 +179,7 @@ pub async fn sync(
                         println!("      Please:");
                         println!("        1. Resolve the conflicts manually");
                         println!("        2. Run 'jj squash' to finalize the merge");
-                        println!("        3. Re-run 'jstack sync' to complete synchronization");
+                        println!("        3. Re-run 'jj-pr sync' to complete synchronization");
                         println!("\n   Error details: {}", error_msg);
                         error_count += 1;
                         continue;

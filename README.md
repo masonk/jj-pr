@@ -1,6 +1,6 @@
 # jjpr: A Rust utility for stacked PRs with Jujutsu
 
-A utility that facilitates stacked pull requests when using the Jujutsu version control system.
+A utility that facilitates stacked pull requests on Github when using the Jujutsu version control system locally.
 
 ## Overview
 
@@ -13,6 +13,16 @@ Commit-based code review is a better model because both commits and PRs need to 
 Atomicity means that each individual commit should "have a coherent thesis and be a complete change in and of itself". A "complete change" means that the commit leaves the repo in a state where it has a new piece of functionality, the software works, does not break CI workflows or cause other inconveniences for other developers. Meanwhile, a code reviewer should *also* should be presented with changes which "have a coherent thesis" and "are a complete change in of itself". After all, some of a code reviewer's most important jobs are to determine whether a changeset's thesis makes sense, whether the changeset accomplishes its thesis, and whether the changest breaks anything or has unintended consequences. How could a reviewer do these jobs if not presented with a complete change which - at least ostensibly - has a coherent thesis? These remarks imply that an ideal unit of code review precisely matches the definition of an ideal commit.
 
 Atomicity also implies that a commit should be indivisible - if it's possible to divide a commit into two subcommits which each stand on their own with a coherent thesis, then that should be done. Once again, this property is precisely the one we desire in code review, since the difficulity of code reviews scales superlinearly with the size of the changeset under review. Two 150 line changests that have all the properties of atomicity are much easier to review than a 300 line changest (or even a 200 line changeset) which has two theses. 
+
+## Installation
+
+Pull source and install using cargo.
+
+```sh
+jj git clone git@github.com:masonk/jj-pr.git
+cd jj-spr
+cargo install --path jj-spr
+```
 
 ## Commands
 

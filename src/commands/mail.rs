@@ -11,6 +11,7 @@ pub async fn mail(
     repo_path: impl AsRef<Path>,
     github_token: String,
     base_override: Option<String>,
+    revisions: Option<String>,
 ) -> Result<()> {
     let jj = Jj::new(&repo_path)?;
     let git = Git::new(&repo_path)?;
@@ -23,12 +24,17 @@ pub async fn mail(
     let github = GitHub::new(github_token, owner.clone(), repo.clone())?;
 
     println!("📬 Finding commits to mail...");
-    println!("   Base branch: {}", config.base_ref());
 
-    // Get all commits between base branch and @
-    let commits = jj
-        .get_commits(config.base_ref(), "@")
-        .context("Failed to get commits from jj")?;
+    // Get all commits - either from revset or between base branch and @
+    let commits = if let Some(ref revset) = revisions {
+        println!("   Using revset: {}", revset);
+        jj.get_commits_from_revset(revset)
+            .context("Failed to get commits from revset")?
+    } else {
+        println!("   Base branch: {}", config.base_ref());
+        jj.get_commits(config.base_ref(), "@")
+            .context("Failed to get commits from jj")?
+    };
 
     // Filter out empty commits
     let nonempty_commits: Vec<_> = commits.into_iter().filter(|c| !c.empty).collect();
