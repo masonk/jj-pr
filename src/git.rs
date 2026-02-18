@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
-use git2::{BranchType, Oid, Repository};
-use std::path::Path;
+use git2::{BranchType, Cred, FetchOptions, Oid, PushOptions, RemoteCallbacks, Repository};
+use std::path::{Path, PathBuf};
+// PathBuf used in remote_callbacks() closure for key file construction
 
 pub struct Git {
     repo: Repository,
@@ -10,6 +11,45 @@ impl Git {
     pub fn new(repo_path: impl AsRef<Path>) -> Result<Self> {
         let repo = Repository::open(repo_path).context("Failed to open git repository")?;
         Ok(Self { repo })
+    }
+
+    /// Build RemoteCallbacks with SSH agent + key-file fallback.
+    fn remote_callbacks() -> RemoteCallbacks<'static> {
+        let mut callbacks = RemoteCallbacks::new();
+        callbacks.credentials(|_url, username, allowed| {
+            let username = username.unwrap_or("git");
+
+            // 1. Try SSH agent (works when ssh-agent / macOS Keychain is running)
+            if allowed.contains(git2::CredentialType::SSH_KEY) {
+                if let Ok(cred) = Cred::ssh_key_from_agent(username) {
+                    return Ok(cred);
+                }
+            }
+
+            // 2. Try common key files under ~/.ssh/
+            if allowed.contains(git2::CredentialType::SSH_KEY) {
+                if let Ok(home) = std::env::var("HOME") {
+                    for key in &["id_ed25519", "id_ecdsa", "id_rsa"] {
+                        let priv_path = PathBuf::from(&home).join(".ssh").join(key);
+                        let pub_path = priv_path.with_extension("pub");
+                        if priv_path.exists() {
+                            if let Ok(cred) = Cred::ssh_key(
+                                username,
+                                pub_path.exists().then(|| pub_path.as_path()),
+                                &priv_path,
+                                None,
+                            ) {
+                                return Ok(cred);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Default credentials (e.g. HTTPS via credential helper)
+            Cred::default()
+        });
+        callbacks
     }
 
     /// Create or update a branch to point at a specific commit
@@ -33,20 +73,43 @@ impl Git {
         let mut remote = self.repo.find_remote(remote_name)?;
         let refspec = format!("refs/heads/{}:refs/heads/{}", branch_name, branch_name);
 
+        let mut opts = PushOptions::new();
+        opts.remote_callbacks(Self::remote_callbacks());
+
         remote
-            .push(&[&refspec], None)
+            .push(&[&refspec], Some(&mut opts))
             .context("Failed to push branch")?;
+        Ok(())
+    }
+
+    /// Force-push a branch to remote (needed when the commit was rewritten, e.g. after annotating
+    /// with a PR number via `jj describe --ignore-immutable`).
+    pub fn force_push_branch(&self, branch_name: &str, remote_name: &str) -> Result<()> {
+        let mut remote = self.repo.find_remote(remote_name)?;
+        let refspec = format!("+refs/heads/{}:refs/heads/{}", branch_name, branch_name);
+
+        let mut opts = PushOptions::new();
+        opts.remote_callbacks(Self::remote_callbacks());
+
+        remote
+            .push(&[&refspec], Some(&mut opts))
+            .context("Failed to force-push branch")?;
         Ok(())
     }
 
     /// Fetch a branch from remote
     pub fn fetch_branch(&self, branch_name: &str, remote_name: &str) -> Result<()> {
         let mut remote = self.repo.find_remote(remote_name)?;
-        let refspec = format!("+refs/heads/{}:refs/remotes/{}/{}",
-                             branch_name, remote_name, branch_name);
+        let refspec = format!(
+            "+refs/heads/{}:refs/remotes/{}/{}",
+            branch_name, remote_name, branch_name
+        );
+
+        let mut opts = FetchOptions::new();
+        opts.remote_callbacks(Self::remote_callbacks());
 
         remote
-            .fetch(&[&refspec], None, None)
+            .fetch(&[&refspec], Some(&mut opts), None)
             .context("Failed to fetch branch")?;
         Ok(())
     }

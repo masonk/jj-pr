@@ -190,9 +190,10 @@ pub async fn sync(
             }
         }
 
-        // Get the updated commit ID after potential squash
+        // Get the updated commit ID after potential squash; use latest() in case the
+        // change ID is temporarily divergent (e.g. left over from a mail annotation).
         let updated_commit_id = jj
-            .resolve_revision(&commit.change_id)
+            .resolve_change_id(&commit.change_id)
             .context("Failed to resolve updated commit")?;
 
         // Update local branch to point at updated commit

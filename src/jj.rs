@@ -1,16 +1,14 @@
 use anyhow::{Context, Result};
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Commit {
     pub change_id: String,
     pub commit_id: String,
     pub description: String,
     pub author: String,
     pub empty: bool,
-    #[serde(skip)]
     pub pr_number: Option<u64>,
 }
 
@@ -52,13 +50,12 @@ impl Jj {
 
     /// Get commits from a revset expression
     pub fn get_commits_from_revset(&self, revset: &str) -> Result<Vec<Commit>> {
-        let template = r#"{
-            "change_id": change_id,
-            "commit_id": commit_id,
-            "description": description,
-            "author": author.email(),
-            "empty": empty
-        }"#;
+        // Field separator: \0 (null). Record separator: \n\0\n.
+        // \n\0\n cannot appear in real commit descriptions, and avoids the ambiguity that
+        // arises when an empty description produces \0\0\0 (field-sep + empty-desc + rec-sep),
+        // which would cause \0\0 splitting to bleed a leading \0 into the next record.
+        // Record format: change_id\0commit_id\0author\0empty\0description\n\0\n
+        let template = r#"change_id ++ "\0" ++ commit_id ++ "\0" ++ author.email() ++ "\0" ++ if(empty, "true", "false") ++ "\0" ++ description ++ "\n\0\n""#;
 
         let output = self.execute(&[
             "log",
@@ -69,19 +66,25 @@ impl Jj {
             template,
         ])?;
 
-        // Parse each line as a separate JSON object
         let mut commits = Vec::new();
-        for line in output.lines() {
-            let line = line.trim();
-            if line.is_empty() {
+        for record in output.split("\n\x00\n") {
+            if record.trim_matches('\n').is_empty() {
                 continue;
             }
-            let mut commit: Commit = serde_json::from_str(line)
-                .context("Failed to parse commit JSON")?;
-
-            // Parse PR number from commit message
+            // Split into at most 5 fields; description is last and may contain \0 (unlikely but safe)
+            let parts: Vec<&str> = record.splitn(5, '\0').collect();
+            if parts.len() < 5 {
+                continue;
+            }
+            let mut commit = Commit {
+                change_id: parts[0].to_string(),
+                commit_id: parts[1].to_string(),
+                author: parts[2].to_string(),
+                empty: parts[3] == "true",
+                description: parts[4].to_string(),
+                pr_number: None,
+            };
             commit.pr_number = crate::message::parse_pr_number(&commit.description);
-
             commits.push(commit);
         }
 
@@ -94,6 +97,16 @@ impl Jj {
         Ok(output.trim().to_string())
     }
 
+    /// Resolve a change ID to a commit ID, using latest() to handle divergence.
+    /// After `jj describe --ignore-immutable`, a change ID may temporarily have two
+    /// commits (the old one still referenced by git refs and the new rewritten one).
+    /// latest() picks the most recently created, which is the one we want.
+    pub fn resolve_change_id(&self, change_id: &str) -> Result<String> {
+        let revset = format!("latest(change_id({}))", change_id);
+        let output = self.execute(&["log", "-r", &revset, "-T", "commit_id", "--no-graph"])?;
+        Ok(output.trim().to_string())
+    }
+
     /// Get the change ID for a specific revision
     pub fn get_change_id(&self, revision: &str) -> Result<String> {
         let output = self.execute(&["log", "-r", revision, "-T", "change_id", "--no-graph"])?;
@@ -102,7 +115,8 @@ impl Jj {
 
     /// Update commit message for a change
     pub fn describe(&self, change_id: &str, message: &str) -> Result<()> {
-        self.execute(&["describe", "-r", change_id, "-m", message])?;
+        let revset = format!("latest(change_id({}))", change_id);
+        self.execute(&["describe", "--ignore-immutable", "-r", &revset, "-m", message])?;
         Ok(())
     }
 
