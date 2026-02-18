@@ -50,9 +50,12 @@ impl Jj {
 
     /// Get commits from a revset expression
     pub fn get_commits_from_revset(&self, revset: &str) -> Result<Vec<Commit>> {
-        // Use null bytes as field separators (safe since git commit metadata never contains \0)
-        // Record format: change_id\0commit_id\0author\0empty\0description\0\0
-        let template = r#"change_id ++ "\0" ++ commit_id ++ "\0" ++ author.email() ++ "\0" ++ if(empty, "true", "false") ++ "\0" ++ description ++ "\0\0""#;
+        // Field separator: \0 (null). Record separator: \n\0\n.
+        // \n\0\n cannot appear in real commit descriptions, and avoids the ambiguity that
+        // arises when an empty description produces \0\0\0 (field-sep + empty-desc + rec-sep),
+        // which would cause \0\0 splitting to bleed a leading \0 into the next record.
+        // Record format: change_id\0commit_id\0author\0empty\0description\n\0\n
+        let template = r#"change_id ++ "\0" ++ commit_id ++ "\0" ++ author.email() ++ "\0" ++ if(empty, "true", "false") ++ "\0" ++ description ++ "\n\0\n""#;
 
         let output = self.execute(&[
             "log",
@@ -64,7 +67,7 @@ impl Jj {
         ])?;
 
         let mut commits = Vec::new();
-        for record in output.split("\0\0") {
+        for record in output.split("\n\x00\n") {
             if record.trim_matches('\n').is_empty() {
                 continue;
             }
@@ -102,7 +105,7 @@ impl Jj {
 
     /// Update commit message for a change
     pub fn describe(&self, change_id: &str, message: &str) -> Result<()> {
-        self.execute(&["describe", "-r", change_id, "-m", message])?;
+        self.execute(&["describe", "--ignore-immutable", "-r", change_id, "-m", message])?;
         Ok(())
     }
 

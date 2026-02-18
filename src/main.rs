@@ -56,10 +56,25 @@ async fn main() -> Result<()> {
     // Get current directory as repo path
     let repo_path = env::current_dir()?;
 
-    // Get GitHub token from environment
+    // Resolve GitHub token: env vars first, then `gh auth token` if gh CLI is available
     let github_token = env::var("GITHUB_TOKEN")
         .or_else(|_| env::var("GH_TOKEN"))
-        .expect("GITHUB_TOKEN or GH_TOKEN environment variable required");
+        .or_else(|_| {
+            std::process::Command::new("gh")
+                .args(["auth", "token"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .ok_or(env::VarError::NotPresent)
+        })
+        .unwrap_or_else(|_| {
+            eprintln!("Error: GitHub authentication required.");
+            eprintln!("Provide a token via GITHUB_TOKEN, or authenticate with the GitHub CLI:");
+            eprintln!("  gh auth login");
+            std::process::exit(1);
+        });
 
     match cli.command {
         Commands::Mail { base, revisions } => {
