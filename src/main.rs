@@ -47,6 +47,39 @@ enum Commands {
         #[arg(short, long)]
         status: bool,
     },
+    /// Remove the PR association from commit messages
+    Disassociate {
+        /// Base branch to compare against
+        /// If not specified, uses saved config or auto-detects
+        #[arg(short, long, conflicts_with = "revisions")]
+        base: Option<String>,
+
+        /// Revset expression to specify which commits to process
+        /// Mutually exclusive with --base
+        #[arg(short, long)]
+        revisions: Option<String>,
+    },
+}
+
+fn resolve_github_token() -> String {
+    env::var("GITHUB_TOKEN")
+        .or_else(|_| env::var("GH_TOKEN"))
+        .or_else(|_| {
+            std::process::Command::new("gh")
+                .args(["auth", "token"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .ok_or(env::VarError::NotPresent)
+        })
+        .unwrap_or_else(|_| {
+            eprintln!("Error: GitHub authentication required.");
+            eprintln!("Provide a token via GITHUB_TOKEN, or authenticate with the GitHub CLI:");
+            eprintln!("  gh auth login");
+            std::process::exit(1);
+        })
 }
 
 #[tokio::main]
@@ -56,17 +89,17 @@ async fn main() -> Result<()> {
     // Get current directory as repo path
     let repo_path = env::current_dir()?;
 
-    // Get GitHub token from environment
-    let github_token = env::var("GITHUB_TOKEN")
-        .or_else(|_| env::var("GH_TOKEN"))
-        .expect("GITHUB_TOKEN or GH_TOKEN environment variable required");
-
     match cli.command {
         Commands::Mail { base, revisions } => {
-            commands::mail::mail(repo_path, github_token, base, revisions).await?;
+            let token = resolve_github_token();
+            commands::mail::mail(repo_path, token, base, revisions).await?;
         }
         Commands::Sync { base, revisions, status } => {
-            commands::sync::sync(repo_path, github_token, base, revisions, status).await?;
+            let token = resolve_github_token();
+            commands::sync::sync(repo_path, token, base, revisions, status).await?;
+        }
+        Commands::Disassociate { base, revisions } => {
+            commands::disassociate::disassociate(repo_path, base, revisions)?;
         }
     }
 

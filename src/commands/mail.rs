@@ -55,6 +55,11 @@ pub async fn mail(
         println!("   Change ID: {}", commit.change_id);
         println!("   Message: {}", commit.description.lines().next().unwrap_or(""));
 
+        if commit.description.trim().is_empty() {
+            println!("   ⏭️  No description — skipping (add a commit message to create a PR)");
+            continue;
+        }
+
         // Create branch name from change ID
         let branch_name = format!("spr/{}/{}", owner, commit.change_id);
 
@@ -67,7 +72,10 @@ pub async fn mail(
         git.push_branch(&branch_name, "origin")
             .context("Failed to push branch")?;
 
-        let base_branch = previous_branch.trim_start_matches("origin/");
+        let base_branch = previous_branch
+            .strip_suffix("@origin")
+            .or_else(|| previous_branch.strip_prefix("origin/"))
+            .unwrap_or(&previous_branch);
 
         // Check if commit already has a PR number in its message
         if let Some(pr_num) = commit.pr_number {
@@ -93,10 +101,16 @@ pub async fn mail(
                             .context("Failed to update PR base branch")?;
                     }
 
-                    // Add PR number to commit message
+                    // Add PR number to commit message, then re-push the rewritten commit
                     println!("   📝 Adding PR #{} to commit message", pr.number);
                     jj.add_pr_to_commit(&commit.change_id, &commit.description, pr.number)
                         .context("Failed to update commit message")?;
+                    let new_commit_id = jj.resolve_change_id(&commit.change_id)
+                        .context("Failed to resolve commit after annotation")?;
+                    git.create_branch(&branch_name, &new_commit_id)
+                        .context("Failed to update branch to annotated commit")?;
+                    git.force_push_branch(&branch_name, "origin")
+                        .context("Failed to push annotated commit")?;
                 }
                 None => {
                     // Create new PR
@@ -119,10 +133,16 @@ pub async fn mail(
                     println!("   ✅ Created PR #{}: https://github.com/{}/{}/pull/{}",
                              pr.number, owner, repo, pr.number);
 
-                    // Add PR number to commit message
+                    // Add PR number to commit message, then re-push the rewritten commit
                     println!("   📝 Adding PR #{} to commit message", pr.number);
                     jj.add_pr_to_commit(&commit.change_id, &commit.description, pr.number)
                         .context("Failed to update commit message")?;
+                    let new_commit_id = jj.resolve_change_id(&commit.change_id)
+                        .context("Failed to resolve commit after annotation")?;
+                    git.create_branch(&branch_name, &new_commit_id)
+                        .context("Failed to update branch to annotated commit")?;
+                    git.force_push_branch(&branch_name, "origin")
+                        .context("Failed to push annotated commit")?;
                 }
             }
         }
